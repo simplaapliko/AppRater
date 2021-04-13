@@ -21,8 +21,12 @@ import android.content.DialogInterface
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AlertDialog
+import com.google.android.play.core.review.ReviewManagerFactory
+import com.google.android.play.core.review.testing.FakeReviewManager
 import java.util.Date
 
 @Suppress("MemberVisibilityCanBePrivate")
@@ -30,11 +34,55 @@ object AppRater {
     private const val DAY = 24 * 60 * 60 * 1000
 
     /**
+     * Check if 'Google Play In-App Review' dialog needs to be displayed,
+     * based on the first launch date, launch count and do not show again
+     * shared preferences.
+     *
+     * @param activity Activity
+     * @param onCompleteListener On review complete listener
+     */
+    @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
+    @JvmStatic
+    fun appLaunched(activity: Activity, onCompleteListener: () -> Unit) {
+        val preferences = PreferencesHelper(activity)
+        if (preferences.isDoNoShowAgain) {
+            return
+        }
+
+        increment(activity)
+
+        if (isTimeToRate(activity)) {
+            showReviewDialog(activity, onCompleteListener, false)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
+    @JvmStatic
+    fun showReviewDialog(activity: Activity, onCompleteListener: () -> Unit, debug: Boolean) {
+        val manager = if (debug) ReviewManagerFactory.create(activity) else FakeReviewManager(activity)
+
+        val request = manager.requestReviewFlow()
+        request.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val reviewInfo = task.result
+
+                val flow = manager.launchReviewFlow(activity, reviewInfo)
+                flow.addOnCompleteListener {
+                    cancelReminders(activity)
+                    onCompleteListener()
+                }
+            } else {
+                remindLater(activity)
+            }
+        }
+    }
+
+    /**
      * Check if 'rate app' dialog needs to be displayed,
      * based on the first launch date, launch count and do not show again
      * shared preferences.
      *
-     * @param activity FragmentActivity
+     * @param activity Activity
      * @param onPositiveButtonListener Positive button click listener
      * @param onNegativeButtonListener Negative button click listener
      * @param onNeutralButtonListener Neutral button click listener
